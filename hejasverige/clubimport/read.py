@@ -1,22 +1,32 @@
 # -*- coding: utf-8 -*-
 
-from lxml import etree 
-from plone.dexterity.utils import createContent
-from plone.dexterity.utils import addContentToContainer
-import transaction
-from plone.namedfile.file import NamedBlobFile
-from plone.namedfile.interfaces import INamedFileField
-from plone.namedfile.interfaces import INamedImageField
-import mimetypes
-from zope.schema import getFields
-from hejasverige.content.sports.interfaces import IClub
+import logging
 import os
+import mimetypes
+from lxml import etree
 
-LOG_FILE = open('./log.txt', 'w')
+import transaction
 
-def log(s):
-    #import sys
-    print >>LOG_FILE, s
+from zope.component import getUtility
+from zope.component.hooks import getSite
+from zope.schema import getFields
+
+from z3c.relationfield.relation import RelationValue
+
+from plone.dexterity.utils import createContent, addContentToContainer
+from plone.namedfile.file import NamedBlobFile
+
+from plone.namedfile.interfaces import INamedFileField, INamedImageField
+from hejasverige.content.sports.interfaces import IClub
+from zope.intid.interfaces import IIntIds
+
+from Products.CMFPlone.utils import safe_unicode
+
+import plone.api
+
+
+logger = logging.getLogger(__name__)
+
 
 def set_field():
     # Get the field containing data
@@ -43,38 +53,52 @@ def set_field():
     folder = self.context['invoices']
     '''
 
-def try_add_district(district):
-    from Products.CMFPlone.utils import safe_unicode
-    print 'Found district', district.get('name')
-    #districtfolder.allowedContentTypes()[0].id
-    district_obj = createContent(portal_type='hejasverige.District',
-                                 title=safe_unicode(district.get('name')),
-                                 districtId=safe_unicode(district.get('id')),
-                                )
-    try:
-        item = addContentToContainer(container=district.get('context'), object=district_obj, checkConstraints=False)
-    except Exception, ex:
-        print 'Problem when importing district ', district_obj.title, 'due to', str(ex)
-        log(str(ex))
-        #import pdb; pdb.set_trace()
-        return None
-    return item
 
-def try_add_council(council):
-    council_obj = createContent(portal_type='hejasverige.Council',
-                                 title=unicode(council.get('name')),
-                                 councilId=unicode(council.get('id')),
-                                )
-    try:
-        item = addContentToContainer(container=council.get('context'), object=council_obj, checkConstraints=False)
-    except Exception, ex:
-        print 'Problem when importing council', council_obj.title, 'due to', str(ex)
-        log(str(ex))
-        #import pdb; pdb.set_trace()
-        return None
-    return item
+def query_object(context, portal_type, **kwargs):
+    site = getSite()
+    params = dict(portal_type=portal_type, **kwargs)
+    if context is not None:
+        params['path'] = dict(query='/'.join(context.getPhysicalPath()))
+    q = site.portal_catalog(params)
+    b = next(iter(q), None)
+    if b:
+        return b.getObject()
 
-def try_add_club(club, basepath):
+
+def get_or_create_district(context, title, id_):
+    ob = query_object(context, 'hejasverige.District', Title=title)
+    if ob is None:
+        ob = plone.api.content.create(context, 'hejasverige.District',
+            title=safe_unicode(title), districtId=safe_unicode(id_))
+        logger.info('Added district %s %s', title, ob.absolute_url())
+    else:
+        logger.info('Found district %s %s', title, ob.absolute_url())
+    return ob
+
+
+def get_or_create_council(context, title, id_):
+    ob = query_object(context, 'hejasverige.Council', Title=title)
+    if ob is None:
+        ob = plone.api.content.create(context, 'hejasverige.Council',
+            title=safe_unicode(title), councilId=safe_unicode(id_))
+        logger.info('Added council %s %s', title, ob.absolute_url())
+    else:
+        logger.info('Found council %s %s', title, ob.absolute_url())
+    return ob
+
+
+def get_or_create_sport(context, title):
+    ob = query_object(context, 'hejasverige.Sport', Title=title)
+    if ob is None:
+        ob = plone.api.content.create(context, 'hejasverige.Sport',
+                                      title=safe_unicode(title))
+        logger.info('Added sport %s %s', title, ob.absolute_url())
+    else:
+        logger.info('Found sport %s %s', title, ob.absolute_url())
+    return ob
+
+
+def try_add_club(context, club_data, basepath):
     '''
             <Name>Älvdalens SKG</Name>
             <Sport>Skidskytte</Sport>
@@ -112,129 +136,92 @@ def try_add_club(club, basepath):
     PlusGiro
     Presentation
     '''
-    club_obj = createContent(portal_type='hejasverige.Club',
-                             title=unicode(club.get('Name', None)),
-                             VatNo=unicode(club.get('Organisationsnummer', None)),
-                             Sport=unicode(club.get('Sport', None)),
-                             Address1=unicode(club.get('Adress', None)),
-                             PostalCode=unicode(club.get('Postadress', None)),
-                             Phone=unicode(club.get('Telefon', None)),
-                             Founded=unicode(club.get('Bildad', None)),
-                             ExternalUrl=unicode(club.get('href', None)),
-                             BankGiro=unicode(club.get('Bankgiro', None)),
-                             PlusGiro=unicode(club.get('Plusgiro', None)),
-                             Email=unicode(club.get('Epost', None)),
-                             )
 
+    ob = query_object(context, 'hejasverige.Club', Title=club_data['Name'])
+    if ob is not None:
+        logger.info('Found club %s %s', club_data['Name'], ob.absolute_url())
+        return ob
+
+    sport_title = club_data.get('Sport')
+    if not sport_title:
+        logger.info('Missing sport %r', club_data)
+        return
+    sport_folder = query_object(None, 'hejasverige.SportFolder')
+    sport_ob = get_or_create_sport(sport_folder, sport_title)
+    sport_id = getUtility(IIntIds).getId(sport_ob)
+    sport_rel = RelationValue(sport_id)
+
+    ob = plone.api.content.create(context, 'hejasverige.Club',
+        title=unicode(club_data['Name']),
+        VatNo=unicode(club_data.get('Organisationsnummer', None)),
+        Sport=sport_rel,
+        Address1=unicode(club_data.get('Adress', None)),
+        PostalCode=unicode(club_data.get('Postadress', None)),
+        Phone=unicode(club_data.get('Telefon', None)),
+        Founded=unicode(club_data.get('Bildad', None)),
+        ExternalUrl=unicode(club_data.get('href', None)),
+        BankGiro=unicode(club_data.get('Bankgiro', None)),
+        PlusGiro=unicode(club_data.get('Plusgiro', None)),
+        Email=unicode(club_data.get('Epost', None)),
+    )
+
+    logger.info('Added club %s %s', club_data['Name'], ob.absolute_url())
 
     # get image data if present
-    if(club.get('ImagePath')):
+    if(club_data.get('ImagePath')):
         try:
             #import pdb; pdb.set_trace()
-            imagepath = '/'.join([basepath, club.get('ImagePath')])
-            filehandle = open(imagepath, 'r')
-
-            imagedata = filehandle.read()
-            imagename = club.get('href2')
+            imagepath = '/'.join([basepath, club_data.get('ImagePath')])
+            imagedata = open(imagepath, 'r').read()
+            imagename = club_data.get('href2')
             if not imagename:
                 imagename = 'badge'
-
             contenttype = mimetypes.guess_type(imagepath)[0]
-
             value = NamedBlobFile(data=imagedata,
-                                  contentType=contenttype,
-                                  filename=unicode(imagename + imagepath[-4:])
-                                  )
-
+                contentType=contenttype, filename=unicode(imagename + imagepath[-4:]))
             fields = getFields(IClub)
-            field = fields['Badge']
-            field.set(field.interface(club_obj), value)
-            #club_obj.Badge.set(content, value)
-
+            fields['Badge'].set(field.interface(ob), value)
         except IOError, ex:
-            print 'Unable to get image data.', str(ex)
+            logger.error('Unable to get image data for club %s.', club_data['Name'])
+
+    return ob
 
 
-    try:
-        item = addContentToContainer(container=club.get('context'), object=club_obj, checkConstraints=False)
-    except Exception, ex:
-        print 'Problem when importing club', club_obj.title, 'due', str(ex)
-        log(str(ex))
-        import pdb; pdb.set_trace()
-        raise
-        #return None
-    return item
+def import_clubs(context, filename):
 
+    site = getSite()
+    basepath, tail = os.path.split(filename)
+    districtfolder = query_object(site, 'hejasverige.DistrictFolder')
 
-def import_clubs_t(context, filename, destination_folder):
-    import pdb; pdb.set_trace()
-    print 'importing clubs...'
-
-def import_clubs(context, filename, destination_folder):
-
-    try:
-       with open(filename): pass
-    except IOError:
-       print 'Oh dear. File %s does not exist' % filename
-       #import pdb; pdb.set_trace()
-    else:
-        from zope.component.hooks import getSite
-        site = getSite()
-        districtfolder = getattr(site, destination_folder)
-        # import pdb; pdb.set_trace()
-        print 'Districtfolder length', len(districtfolder)
-
-        basepath, tail = os.path.split(filename)
-        print 'Base path:', basepath
-        print 'Tail:', tail
-
-        parser = etree.XMLParser(ns_clean=True)
-        try:
-            tree = etree.parse(filename, parser)
-
-            root = tree.getroot()
-            for district in root.getchildren():
-                if district.tag == 'District':
-                    districtid =  district.attrib.get('id')
-                    districtname =  district.attrib.get('name')
-
-                    new_district = try_add_district({'name': districtname, 'id': districtid, 'context': districtfolder})
-                    #new_district = False
-
-                    if new_district:
-                        for council in district.getchildren()[0].getchildren():
-                            if council.tag == 'Council':
-                                councilid =  council.attrib.get('id')
-                                councilname =  council.attrib.get('name')
-                                
-                                new_council = try_add_council({'name': councilname, 'id': councilid, 'context': new_district})
-                                #new_council = True
-
-                                if new_council:
-                                    for club in council.getchildren()[0].getchildren():
-                                        #import pdb; pdb.set_trace()
-                                        new_club = {'context': new_council}
-                                        for clubinfo in club.getchildren():
-                                            if clubinfo.tag == 'Info':
-                                                for info in clubinfo.getchildren():
-                                                    #import pdb;pdb.set_trace()
-                                                    if info.text:
-                                                        new_club[info.get('name')] = info.text
-                                            else:
-                                                if clubinfo.text:
-                                                    new_club[clubinfo.tag] = clubinfo.text
-                                        try_add_club(new_club, basepath)
+    parser = etree.XMLParser(ns_clean=True)
+    root = etree.parse(filename, parser).getroot()
+    count = 0
+    for district in root.getchildren():
+        if district.tag == 'District':
+            district_ob = get_or_create_district(districtfolder,
+                district.attrib['name'], district.attrib['id'])
+            for council in district.getchildren()[0].getchildren():
+                if council.tag == 'Council':
+                    council_ob = get_or_create_council(district_ob,
+                        council.attrib['name'], council.attrib['id'])
+                    for club in council.getchildren()[0].getchildren():
+                        club_data = {}
+                        for clubinfo in club.getchildren():
+                            if clubinfo.tag == 'Info':
+                                for info in clubinfo.getchildren():
+                                    if info.text:
+                                        club_data[info.get('name')] = info.text
                             else:
-                                print council.tag, 'ignored...'
-                    transaction.savepoint()
-                else:
-                    print district.tag, 'ignored...'
-        except Exception, ex:
-            print "Exception occured:", ex
-
-        print 'Ended... Now commit.'
-        log('Committing...')
-        transaction.commit()
-        log('done')
-        #pass
-    # print etree.tostring(tree.getroot())
+                                if clubinfo.text:
+                                    club_data[clubinfo.tag] = clubinfo.text
+                        logger.info('--- %s %r', club_data['Name'], club_data)
+                        sp = transaction.savepoint()
+                        try:
+                            try_add_club(council_ob, club_data, basepath)
+                        except Exception as e:
+                            logger.exception(e)
+                            sp.rollback()
+                        count += 1
+    logger.info('Committing...')
+    transaction.commit()
+    logger.info('done')

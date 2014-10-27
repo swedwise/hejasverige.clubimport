@@ -18,11 +18,6 @@ class IImportForm(form.Schema):
         description=_(u'Filename to import.'),
         required=True)
 
-    dest_folder = schema.TextLine(
-        title=_(u'Destination'),
-        description=_(u'Destination folder'),
-        required=True)
-
 
 class ImportForm(form.Form):
 
@@ -38,13 +33,11 @@ class ImportForm(form.Form):
         if errors:
             return False
 
-        if data['file_to_import'] is not None:
-            file_to_import = data['file_to_import']
-            dest_folder = data['dest_folder']
-            import_clubs(self, file_to_import, dest_folder)
+        if 'file_to_import' in data:
+            import_clubs(self, data['file_to_import'])
 
         IStatusMessage(self.request).addStatusMessage(
-            "File %s imported. See log-file for more details." % file_to_import,
+            "File %s imported. See log-file for more details." % data['file_to_import'],
             'info')
         redirect_url = "%s/@@import_form" % self.context.absolute_url()
         self.request.response.redirect(redirect_url)
