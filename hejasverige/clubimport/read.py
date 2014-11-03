@@ -3,6 +3,7 @@
 import logging
 import os
 import mimetypes
+import datetime
 from lxml import etree
 
 import transaction
@@ -26,6 +27,10 @@ import plone.api
 
 
 logger = logging.getLogger(__name__)
+
+
+def parse_date(s, fmt='%Y-%m-%d'):
+    if s: return datetime.datetime.strptime(s, fmt).date()
 
 
 def set_field():
@@ -69,7 +74,7 @@ def get_or_create_district(context, title, id_):
     ob = query_object(context, 'hejasverige.District', Title=title)
     if ob is None:
         ob = plone.api.content.create(context, 'hejasverige.District',
-            title=safe_unicode(title), districtId=safe_unicode(id_))
+            title=safe_unicode(title), district_id=safe_unicode(id_))
         logger.info('Added district %s %s', title, ob.absolute_url())
     else:
         logger.info('Found district %s %s', title, ob.absolute_url())
@@ -80,7 +85,7 @@ def get_or_create_council(context, title, id_):
     ob = query_object(context, 'hejasverige.Council', Title=title)
     if ob is None:
         ob = plone.api.content.create(context, 'hejasverige.Council',
-            title=safe_unicode(title), councilId=safe_unicode(id_))
+            title=safe_unicode(title), council_id=safe_unicode(id_))
         logger.info('Added council %s %s', title, ob.absolute_url())
     else:
         logger.info('Found council %s %s', title, ob.absolute_url())
@@ -153,16 +158,16 @@ def try_add_club(context, club_data, basepath):
 
     ob = plone.api.content.create(context, 'hejasverige.Club',
         title=unicode(club_data['Name']),
-        VatNo=unicode(club_data.get('Organisationsnummer', None)),
-        Sport=sport_rel,
-        Address1=unicode(club_data.get('Adress', None)),
-        PostalCode=unicode(club_data.get('Postadress', None)),
-        Phone=unicode(club_data.get('Telefon', None)),
-        Founded=unicode(club_data.get('Bildad', None)),
-        ExternalUrl=unicode(club_data.get('href', None)),
-        BankGiro=unicode(club_data.get('Bankgiro', None)),
-        PlusGiro=unicode(club_data.get('Plusgiro', None)),
-        Email=unicode(club_data.get('Epost', None)),
+        vat_no=unicode(club_data.get('Organisationsnummer', None)),
+        sport=sport_rel,
+        address1=unicode(club_data.get('Adress', None)),
+        postal_code=unicode(club_data.get('Postadress', None)),
+        phone=unicode(club_data.get('Telefon', None)),
+        founded=parse_date(club_data.get('Bildad', None)),
+        external_url=unicode(club_data.get('href', None)),
+        bank_giro=unicode(club_data.get('Bankgiro', None)),
+        plus_giro=unicode(club_data.get('Plusgiro', None)),
+        email=unicode(club_data.get('Epost', None)),
     )
 
     logger.info('Added club %s %s', club_data['Name'], ob.absolute_url())
@@ -180,7 +185,7 @@ def try_add_club(context, club_data, basepath):
             value = NamedBlobFile(data=imagedata,
                 contentType=contenttype, filename=unicode(imagename + imagepath[-4:]))
             fields = getFields(IClub)
-            fields['Badge'].set(field.interface(ob), value)
+            fields['badge'].set(fields['badge'].interface(ob), value)
         except IOError, ex:
             logger.error('Unable to get image data for club %s.', club_data['Name'])
 
@@ -204,7 +209,8 @@ def import_clubs(context, filename):
                 if council.tag == 'Council':
                     council_ob = get_or_create_council(district_ob,
                         council.attrib['name'], council.attrib['id'])
-                    for club in council.getchildren()[0].getchildren():
+                    for i, club in enumerate(council.getchildren()[0].getchildren()):
+                        if i > 10: break # XXX: only 10 clubs per council
                         club_data = {}
                         for clubinfo in club.getchildren():
                             if clubinfo.tag == 'Info':
