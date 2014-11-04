@@ -30,7 +30,11 @@ logger = logging.getLogger(__name__)
 
 
 def parse_date(s, fmt='%Y-%m-%d'):
-    if s: return datetime.datetime.strptime(s, fmt).date()
+    if s:
+        try:
+            return datetime.datetime.strptime(s, fmt).date()
+        except Exception as e:
+            pass
 
 
 def set_field():
