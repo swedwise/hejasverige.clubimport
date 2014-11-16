@@ -157,13 +157,11 @@ def try_add_club(context, club_data, basepath):
         return
     sport_folder = query_object(None, 'hejasverige.SportFolder')
     sport_ob = get_or_create_sport(sport_folder, sport_title)
-    sport_id = getUtility(IIntIds).getId(sport_ob)
-    sport_rel = RelationValue(sport_id)
 
     ob = plone.api.content.create(context, 'hejasverige.Club',
         title=unicode(club_data['Name']),
         vat_no=unicode(club_data.get('Organisationsnummer', None)),
-        sport=sport_rel,
+        sport=sport_ob.UID(),
         address1=unicode(club_data.get('Adress', None)),
         postal_code=unicode(club_data.get('Postadress', None)),
         phone=unicode(club_data.get('Telefon', None)),
