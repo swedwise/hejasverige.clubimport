@@ -160,7 +160,8 @@ def try_add_club(context, club_data, basepath):
 
     ob = plone.api.content.create(context, 'hejasverige.Club',
         title=unicode(club_data['Name']),
-        vat_no=unicode(club_data.get('Organisationsnummer', None)),
+        idrott_online_id=unicode(club_data.get('Föreningsnummer', None)),
+        organization_id=unicode(club_data.get('Organisationsnummer', None)),
         sport=sport_ob.UID(),
         address1=unicode(club_data.get('Adress', None)),
         postal_code=unicode(club_data.get('Postadress', None)),
