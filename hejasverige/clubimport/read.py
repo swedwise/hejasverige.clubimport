@@ -175,6 +175,8 @@ def try_add_club(context, club_data, basepath):
 
     logger.info('Added club %s %s', club_data['Name'], ob.absolute_url())
 
+    return ob
+
     # get image data if present
     if(club_data.get('ImagePath')):
         try:
@@ -207,13 +209,17 @@ def import_clubs(context, filename):
     for district in root.getchildren():
         if district.tag == 'District':
             district_ob = get_or_create_district(districtfolder,
-                district.attrib['name'], district.attrib['id'])
+                district.attrib['name'].replace(u'Idrottsförbund', u'').strip(),
+                district.attrib['id']
+            )
             for council in district.getchildren()[0].getchildren():
                 if council.tag == 'Council':
+                    if council.attrib['name'] != u'Karlstad':
+                        continue
                     council_ob = get_or_create_council(district_ob,
                         council.attrib['name'], council.attrib['id'])
                     for i, club in enumerate(council.getchildren()[0].getchildren()):
-                        if i > 10: break # XXX: only 10 clubs per council
+                        #~ if i > 10: break # XXX: only 10 clubs per council
                         club_data = {}
                         for clubinfo in club.getchildren():
                             if clubinfo.tag == 'Info':
@@ -224,12 +230,7 @@ def import_clubs(context, filename):
                                 if clubinfo.text:
                                     club_data[clubinfo.tag] = clubinfo.text
                         logger.info('--- %s %r', club_data['Name'], club_data)
-                        sp = transaction.savepoint()
-                        try:
-                            try_add_club(council_ob, club_data, basepath)
-                        except Exception as e:
-                            logger.exception(e)
-                            sp.rollback()
+                        try_add_club(council_ob, club_data, basepath)
                         count += 1
     logger.info('Committing...')
     transaction.commit()
